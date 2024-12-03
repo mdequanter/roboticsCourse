@@ -7,5 +7,6 @@ sudo apt update
 sudo apt upgrade
 sudo apt install ros-humble-desktop
 sudo apt install ros-dev-tools
+sudo apt install ros-humble-gazebo-*
 echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc
 source ~/.bashrc 
