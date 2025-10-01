@@ -6,7 +6,6 @@ from spherov2.types import Color
 from spherov2.sphero_edu import SpheroEduAPI
 from spherov2.commands.power import Power
 import math
-import struct
 
 '''
 SB-9DD8 1
@@ -16,7 +15,6 @@ SB-81E0 4
 SB-7740 5
 '''
 
-# Button mapping (Playstation-style layout typical on many gamepads)
 buttons = {
     '1': 0,
     '2': 1,
@@ -30,55 +28,6 @@ buttons = {
     'START': 9
 }
 
-# Map speeds to distinct beep frequencies (Hz)
-SPEED_FREQS = {
-    50: 440,   # A4
-    70: 554,   # C#5
-    100: 659,  # E5
-    200: 880   # A5
-}
-
-# ------------ Sound helpers (no external files needed) ------------
-
-def ensure_mixer(sample_rate=44100, size=-16, channels=1):
-    """Initialize the mixer if needed, with deterministic format (16-bit signed mono)."""
-    if not pygame.mixer.get_init():
-        pygame.mixer.init(frequency=sample_rate, size=size, channels=channels, buffer=512)
-
-def create_tone_sound(freq_hz: int, duration_ms: int = 180, volume: float = 0.6) -> pygame.mixer.Sound:
-    """
-    Create a short sine-tone Sound without numpy.
-    - 16-bit signed mono PCM
-    - duration_ms milliseconds long
-    """
-    ensure_mixer()
-    mixer_info = pygame.mixer.get_init()
-    if mixer_info is None:
-        # Fallback if still not initialized for some reason
-        mixer_rate, _, _ = (44100, -16, 1)
-    else:
-        mixer_rate, _, _ = mixer_info  # (frequency, format, channels)
-
-    n_samples = int(mixer_rate * (duration_ms / 1000.0))
-    # 16-bit signed range
-    max_amp = int(32767 * max(0.0, min(1.0, volume)))
-
-    frames = bytearray()
-    # Build little-endian signed 16-bit PCM
-    two_pi_f_div_sr = 2.0 * math.pi * freq_hz / mixer_rate
-    for i in range(n_samples):
-        sample = int(max_amp * math.sin(two_pi_f_div_sr * i))
-        frames += struct.pack('<h', sample)
-
-    # Construct pygame Sound from raw buffer
-    snd = pygame.mixer.Sound(buffer=frames)
-    return snd
-
-def build_speed_sounds() -> dict:
-    """Create (or recreate) tone Sounds for each speed."""
-    return {spd: create_tone_sound(freq) for spd, freq in SPEED_FREQS.items()}
-
-# -----------------------------------------------------------------
 
 
 class SpheroController:
@@ -103,15 +52,7 @@ class SpheroController:
         self.boosterCounter = 0
         self.calibrated = False
 
-        # Prepare sounds for speed beeps
-        ensure_mixer()
-        self.speed_sounds = build_speed_sounds()
-
-    def play_beep_for_speed(self, speed_value: int):
-        """Play a short tone corresponding to the chosen speed (if defined)."""
-        snd = self.speed_sounds.get(speed_value)
-        if snd:
-            snd.play()  # short tone; duration baked into the buffer
+        
 
     def discover_nearest_toy(self):
         try:
@@ -120,11 +61,12 @@ class SpheroController:
                 print("Geen Sphero's gevonden.")
                 return
             self.toy = toys[0]
-            print(f"Dichtstbijzijnde Sphero toy '{self.toy.name}' ontdekt.")
+            print(f"Dichtstbijzijnde Sphero toy '{self.toy.name}' ontdekt.")            
             return self.toy.name
         except Exception as e:
             print(f"Error no toys nearby: {e}")
         
+    
     def discover_toy(self, toy_name):
         try:
             self.toy = scanner.find_toy(toy_name=toy_name)
@@ -211,18 +153,17 @@ class SpheroController:
                 self.enter_calibration_mode(api, 0)
                 self.exit_calibration_mode(api)
 
-                hillCounter = 0  # initialize (was referenced before assignment)
-
                 while self.is_running:
                     pygame.event.pump()
                     if not self.gameOn:
-                        self.gameStartTime = time.time()
+                        self.gameStartTime = time.time()                        
                     current_time2 = time.time()
+                    gameTime = current_time2 - self.gameStartTime    
 
                     if current_time2 - last_battery_print_time >= 60:
                         self.print_battery_level(api)
                         last_battery_print_time = current_time2
-
+                                                            
                     if self.gameOn:
                         acceleration_data = api.get_acceleration()
                         if acceleration_data is not None:
@@ -242,30 +183,30 @@ class SpheroController:
                     
                     X = self.joystick.get_axis(0)
                     Y = self.joystick.get_axis(1)
+                    #for i in range(self.joystick.get_numbuttons()):
+                    #    button = self.joystick.get_button(i)
+                    #    print(f"Button {i}: {button}")
 
-                    # ---------- Speed buttons with beep on change ----------
-                    old_speed = self.speed
-                    if self.joystick.get_button(buttons['1']) == 1:
+
+                    if (self.joystick.get_button(buttons['1']) == 1):
                         self.speed = 50
-                    if self.joystick.get_button(buttons['2']) == 1:
+                    if (self.joystick.get_button(buttons['2']) == 1):
                         self.speed = 70
-                    if self.joystick.get_button(buttons['3']) == 1:
+                    if (self.joystick.get_button(buttons['3']) == 1):
                         self.speed = 100
-                    if self.joystick.get_button(buttons['4']) == 1:
+                    if (self.joystick.get_button(buttons['4']) == 1):
                         self.speed = 200
 
-                    if self.speed != old_speed:
-                        self.play_beep_for_speed(self.speed)
 
-                    # ---------- Driving ----------
+
                     if Y < -0.7:
                         self.move(api, self.base_heading, self.speed)
                     elif Y > 0.7:
-                        self.move(api, self.base_heading + 180, self.speed)
+                            self.move(api, self.base_heading + 180, self.speed)
                     elif X > 0.7:
-                        self.move(api, self.base_heading + 22, 0)
+                            self.move(api, self.base_heading + 22, 0)
                     elif X < -0.7:
-                        self.move(api, self.base_heading - 22, 0)
+                            self.move(api, self.base_heading - 22, 0)
                     else:
                         api.set_speed(0)
    
@@ -274,10 +215,7 @@ class SpheroController:
         finally:
             pygame.quit()
 
-
 def main(toy_name=None, joystickID=0, playerID=1):
-    # Make sure audio is ready before other pygame modules
-    ensure_mixer()
     pygame.init()
     pygame.joystick.init()
 
@@ -297,9 +235,9 @@ def main(toy_name=None, joystickID=0, playerID=1):
 
     sphero_controller.discover_toy(toy_name)
 
+
     if sphero_controller.toy:
         sphero_controller.control_toy()
-
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
