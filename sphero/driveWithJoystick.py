@@ -15,6 +15,20 @@ SB-81E0 4
 SB-7740 5
 '''
 
+buttons = {
+    '1': 0,
+    '2': 1,
+    '3': 2,
+    '4': 3,
+    'L1': 4,
+    'L2': 6,
+    'R1': 5,
+    'R2': 7,
+    'SELECT': 8,
+    'START': 9
+}
+
+
 
 class SpheroController:
     def __init__(self, joystick, color, ball_number):
@@ -135,6 +149,7 @@ class SpheroController:
                 last_timePassed_print_time = time.time()
                 self.set_number(self.number)
                 self.display_number(api)
+                self.toggle_calibration_mode(api, 0)
 
                 while self.is_running:
                     pygame.event.pump()
@@ -176,9 +191,6 @@ class SpheroController:
                     boosterButton = self.joystick.get_button(2)
                     MoveButton = self.joystick.get_button(0)
                     button_x = self.joystick.get_button(1)
-                    if button_x == 0 and self.previous_button == 1 and not self.calibrated:
-                        self.toggle_calibration_mode(api, X)
-                    self.previous_button = button_x 
 
                     if self.calibration_mode:
                         self.enter_calibration_mode(api, X)
