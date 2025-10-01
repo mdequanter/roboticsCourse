@@ -141,6 +141,14 @@ class SpheroController:
     def print_battery_level(self, api):
         battery_voltage = Power.get_battery_voltage(self.toy)
         print(f"Battery status of {self.number}: {battery_voltage} V ")
+        if (battery_voltage > 4.1):
+            api.set_main_led(Color(r=0, g=255, b=0))
+        if battery_voltage < 4.1 and battery_voltage > 3.9:
+            api.set_main_led(Color(r=255, g=255, b=0))
+        if battery_voltage < 3.9:
+            api.set_main_led(Color(r=255, g=100, b=0))
+        if battery_voltage < 3.7:
+            api.set_main_led(Color(r=255, g=0, b=0))
         if battery_voltage < 3.5:
             exit("Battery")
 
@@ -160,7 +168,7 @@ class SpheroController:
                     current_time2 = time.time()
                     gameTime = current_time2 - self.gameStartTime    
 
-                    if current_time2 - last_battery_print_time >= 60:
+                    if current_time2 - last_battery_print_time >= 30:
                         self.print_battery_level(api)
                         last_battery_print_time = current_time2
                                                             
