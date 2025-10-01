@@ -149,7 +149,7 @@ class SpheroController:
                 last_timePassed_print_time = time.time()
                 self.set_number(self.number)
                 self.display_number(api)
-                self.toggle_calibration_mode(api, 0)
+                self.toggle_calibration_mode(api, 1)
 
                 while self.is_running:
                     pygame.event.pump()
