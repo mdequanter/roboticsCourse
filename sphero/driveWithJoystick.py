@@ -193,7 +193,7 @@ class SpheroController:
                         api.set_main_led(Color(r=0, g=0, b=255))
                         self.display_number(api)
                     if (self.joystick.get_button(buttons['2']) == 1):
-                        self.speed = 
+                        self.speed =70
                         self.color = Color(r=0, g=255, b=255)
                         self.display_number(api)
 
