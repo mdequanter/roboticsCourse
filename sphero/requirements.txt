@@ -1,0 +1,3 @@
+spherov2
+bleak
+pygame

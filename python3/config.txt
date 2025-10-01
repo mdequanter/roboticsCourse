@@ -1,0 +1,6 @@
+name=TurtleBot
+speed=0.8
+battery_capacity=5200
+sensor_front=IR
+sensor_side=LIDAR
+mode=autonomous
