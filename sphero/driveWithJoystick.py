@@ -169,6 +169,10 @@ class SpheroController:
                     
                     X = self.joystick.get_axis(0)
                     Y = self.joystick.get_axis(1)
+                    for i in range(self.joystick.get_numbuttons()):
+                        button = self.joystick.get_button(i)
+                        print(f"Button {i}: {button}")
+
                     boosterButton = self.joystick.get_button(2)
                     MoveButton = self.joystick.get_button(0)
                     button_x = self.joystick.get_button(1)
