@@ -176,10 +176,7 @@ class SpheroController:
                                 hillCounter += 1
                                 if hillCounter > 10:
                                     seconds = (current_time2 - self.gameStartTime)
-                                    print(f"Player {self.number} lost! Ball survived {seconds:.2f} seconds")
-                                    self.gameOn = False
-                                    self.gameStartTime = time.time()
-                                    exit()
+                                    print(f"Player {self.number} going wild")
                             else:
                                 hillCounter = 0
                         else:
