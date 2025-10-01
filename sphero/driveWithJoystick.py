@@ -52,6 +52,8 @@ class SpheroController:
         self.boosterCounter = 0
         self.calibrated = False
 
+        
+
     def discover_nearest_toy(self):
         try:
             toys = scanner.find_toys()
@@ -149,7 +151,7 @@ class SpheroController:
                 last_timePassed_print_time = time.time()
                 self.set_number(self.number)
                 self.display_number(api)
-                self.toggle_calibration_mode(api, 1)
+                self.exit_calibration_mode(api)
 
                 while self.is_running:
                     pygame.event.pump()
