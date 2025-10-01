@@ -192,32 +192,31 @@ class SpheroController:
                         print(f"Button {i}: {button}")
 
                     boosterButton = self.joystick.get_button(2)
-                    MoveButton = self.joystick.get_button(0)
+                    MoveButton = self.joystick.get_button(buttons['1'])
                     button_x = self.joystick.get_button(1)
 
-                    if self.calibration_mode:
-                        self.enter_calibration_mode(api, X)
-                    else:
-                        if MoveButton == 1:
-                            self.move(api, self.base_heading, 50)
-                        if MoveButton == 1:
-                            self.move(api, self.base_heading, 100)
+                    if (self.joystick.get_button(buttons['1']) == 1):
+                        self.speed = 50
+                    if (self.joystick.get_button(buttons['2']) == 1):
+                        self.speed = 70
+                    if (self.joystick.get_button(buttons['3']) == 1):
+                        self.speed = 100
+                    if (self.joystick.get_button(buttons['4']) == 1):
+                        self.speed = 200
 
-                        elif boosterButton == 1 and self.boosterCounter < 5:
-                            self.move(api, self.base_heading, 100)
-                            self.boosterCounter += 1
-                            time.sleep(0.5)
 
-                        elif Y < -0.7:
-                            self.move(api, self.base_heading - 180, self.speed)
-                        elif Y > 0.7:
+
+                    if Y < -0.7:
+                        self.move(api, self.base_heading - 180, self.speed)
+                    elif Y > 0.7:
                             self.move(api, self.base_heading + 180, self.speed)
-                        elif X > 0.7:
+                    elif X > 0.7:
                             self.move(api, self.base_heading + 22, 0)
-                        elif X < -0.7:
+                    elif X < -0.7:
                             self.move(api, self.base_heading - 22, 0)
-                        else:
-                            api.set_speed(0)
+                    else:
+                        api.set_speed(0)
+   
                     self.base_heading = api.get_heading()
 
         finally:
