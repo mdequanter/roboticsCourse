@@ -146,22 +146,7 @@ class SpheroController:
                     if current_time2 - last_battery_print_time >= 60:
                         self.print_battery_level(api)
                         last_battery_print_time = current_time2
-                    
-                    if self.gameOn and gameTime > 310:
-                        print(f"Player {self.number} won! Ball survived for 5 minutes")
-                        self.gameOn = False
-                        self.gameStartTime = time.time()
-                        exit()
-                        
-                    if current_time2 - last_timePassed_print_time >= 60:
-                        seconds = (current_time2 - self.gameStartTime)
-                        minutes = int(seconds / 60)
-                        if minutes >= 1 and minutes <= 3:
-                            print(f"{5-minutes} minutes left for player {self.number}")
-                        if minutes == 4:
-                            print(f"1 minute left player {self.number}")
-                        last_timePassed_print_time = time.time()
-                
+                                                            
                     if self.gameOn:
                         acceleration_data = api.get_acceleration()
                         if acceleration_data is not None:
@@ -233,18 +218,19 @@ def main(toy_name=None, joystickID=0, playerID=1):
 
     sphero_color = Color(255, 0, 0)
     sphero_controller = SpheroController(joystick, sphero_color, playerID)
-    
-    if toy_name == 'Any':
-        toy_name = sphero_controller.discover_nearest_toy()
+
+    if toy_name is None:
+        exit("No toy name provided")
 
     sphero_controller.discover_toy(toy_name)
+
 
     if sphero_controller.toy:
         sphero_controller.control_toy()
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        print("Usage: python script.py <toy_name/or Any> <joystickNumber 0-1> <player 1-5>")
+        print("Usage: python script.py <toy_name> <joystickNumber 0-1> <player 1-5>")
         sys.exit(1)
     
     toy_name = sys.argv[1]
