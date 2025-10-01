@@ -151,6 +151,7 @@ class SpheroController:
                 last_timePassed_print_time = time.time()
                 self.set_number(self.number)
                 self.display_number(api)
+                self.enter_calibration_mode(api, 0)
                 self.exit_calibration_mode(api)
 
                 while self.is_running:
