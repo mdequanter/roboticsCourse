@@ -148,7 +148,6 @@ class SpheroController:
         try:
             with self.connect_toy() as api:
                 last_battery_print_time = time.time()
-                last_timePassed_print_time = time.time()
                 self.set_number(self.number)
                 self.display_number(api)
                 self.enter_calibration_mode(api, 0)
@@ -188,9 +187,6 @@ class SpheroController:
                         button = self.joystick.get_button(i)
                         print(f"Button {i}: {button}")
 
-                    boosterButton = self.joystick.get_button(2)
-                    MoveButton = self.joystick.get_button(buttons['1'])
-                    button_x = self.joystick.get_button(1)
 
                     if (self.joystick.get_button(buttons['1']) == 1):
                         self.speed = 50
