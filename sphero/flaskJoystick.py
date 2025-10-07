@@ -321,7 +321,7 @@ INDEX_HTML = """
 
   <form method="post" action="{{ url_for('start') }}">
     <label for="toy_name">Toy name</label>
-    <input id="toy_name" name="toy_name" placeholder="bv. SB-9DD8" required>
+    <input id="toy_name" name="toy_name" placeholder="bv. SB-9DD8" value="{{ request.form.get('toy_name', '') }}" required>
 
     <div class="row">
       <div>
