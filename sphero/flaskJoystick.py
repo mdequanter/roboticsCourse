@@ -13,7 +13,7 @@ from spherov2.sphero_edu import SpheroEduAPI
 from spherov2.commands.power import Power
 
 # -----------------------------
-# Originele (aangepaste) logic
+# Sphero / Joystick configuratie
 # -----------------------------
 
 buttons = {
@@ -28,7 +28,6 @@ class SpheroController:
         self.speed = 50
         self.heading = 0
         self.base_heading = 0
-        self.is_running = False
         self.calibration_mode = False
         self.joystick = joystick
         self.last_command_time = time.time()
@@ -43,10 +42,14 @@ class SpheroController:
         self.gameOn = False
         self.boosterCounter = 0
         self.calibrated = False
-        self.hillCounter = 0  # bugfix: bestond nog niet
+        self.hillCounter = 0
+
+        # Thread/stop-state
+        self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._api_ctx = None
 
+    # ---------- Discovery / Connect ----------
     def discover_nearest_toy(self) -> Optional[str]:
         try:
             toys = scanner.find_toys()
@@ -79,6 +82,7 @@ class SpheroController:
             print("No toy discovered. Please run discover_toy() first.")
         return None
 
+    # ---------- Besturing ----------
     def move(self, api, heading, speed):
         api.set_heading(heading % 360)
         api.set_speed(speed)
@@ -124,8 +128,8 @@ class SpheroController:
             try:
                 api.set_matrix_character(number_char, self.color)
             except Exception as e:
-                # Niet alle modellen ondersteunen een matrix; vang dit netjes af.
-                print(f"Kon matrix niet zetten ({e}); val terug op alleen kleur.")
+                # fallback voor modellen zonder matrix
+                print(f"Matrix niet beschikbaar ({e}); fallback naar main LED.")
                 api.set_main_led(self.color)
         else:
             print(f"Error in matrix '{self.number}'")
@@ -144,17 +148,16 @@ class SpheroController:
                 api.set_front_led(Color(r=255, g=0, b=0))
             if battery_voltage < 3.5:
                 print("Battery te laag — stop.")
-                self.is_running = False
+                self._stop_evt.set()
         except Exception as e:
             print(f"Kon batterijstatus niet lezen: {e}")
 
+    # ---------- Loop / Thread ----------
     def _loop(self):
         api = self.connect_toy()
         if api is None:
-            self.is_running = False
             return
 
-        # context bewaren om later proper te sluiten
         self._api_ctx = api
         try:
             with api:
@@ -164,7 +167,7 @@ class SpheroController:
                 self.enter_calibration_mode(api, 0)
                 self.exit_calibration_mode(api)
 
-                while self.is_running:
+                while not self._stop_evt.is_set():
                     pygame.event.pump()
 
                     if not self.gameOn:
@@ -234,29 +237,42 @@ class SpheroController:
 
                     time.sleep(0.01)
         finally:
+            # altijd stilleggen
             try:
-                # Zorg dat de robot stil valt als we stoppen
                 if self._api_ctx:
                     try:
                         self._api_ctx.set_speed(0)
                     except Exception:
                         pass
-            except Exception:
-                pass
-            self._api_ctx = None
+            finally:
+                self._api_ctx = None
 
     def start(self):
-        if self.is_running:
+        if self._thread and self._thread.is_alive():
             return
-        self.is_running = True
+        self._stop_evt.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def stop(self):
-        self.is_running = False
-        # Thread zal vanzelf stoppen; evt. kort wachten is oké
-        # (geen join hier om Flask niet te blokkeren)
+    def stop(self, join_timeout: float = 3.0):
+        # signaleer stop
+        self._stop_evt.set()
+        # noodstop + netjes sluiten
+        try:
+            if self._api_ctx:
+                try:
+                    self._api_ctx.set_speed(0)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # wacht kort op thread-einde
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=join_timeout)
 
+    @property
+    def running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
 
 # -----------------------------
 # Flask app
@@ -264,12 +280,11 @@ class SpheroController:
 
 app = Flask(__name__)
 
-# Globale (enkelvoudige) controller-instance
 controller: Optional[SpheroController] = None
 joystick_obj = None
 
-# Pygame init één keer (server-start)
 def init_pygame_and_joystick(joystick_id: int):
+    """Initialiseer pygame en kies joystick."""
     global joystick_obj
     pygame.init()
     pygame.joystick.init()
@@ -295,7 +310,7 @@ INDEX_HTML = """
     input, select, button { padding: .5rem .6rem; font-size: 1rem; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
     .status { margin: 1rem 0; padding: .75rem; background: #f6f6f6; border-radius: 8px; }
-    .actions { display: flex; gap: .5rem; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
     code { background:#eee; padding:.2rem .4rem; border-radius:4px;}
   </style>
 </head>
@@ -326,12 +341,12 @@ INDEX_HTML = """
 
     <div class="actions">
       <button type="submit">Start</button>
-      <button formaction="{{ url_for('discover_nearest') }}" formmethod="post">Zoek dichtstbijzijnde</button>
+      <button formaction="{{ url_for('discover_nearest') }}" formmethod="post" type="submit">Zoek dichtstbijzijnde</button>
       <button formaction="{{ url_for('stop') }}" formmethod="post" type="submit">Stop</button>
     </div>
   </form>
 
-  <p>Tip: bekende mappings:<br>
+  <p>Tip: bekende mappings:
      <code>SB-9DD8 → 1</code>, <code>SB-2BBE → 2</code>, <code>SB-27A5 → 3</code>, <code>SB-81E0 → 4</code>, <code>SB-7740 → 5</code>
   </p>
 
@@ -361,8 +376,9 @@ def index():
 @app.route("/status", methods=["GET"])
 def status():
     global controller, joystick_obj
+    running = bool(controller and controller.running)
     return jsonify({
-        "running": bool(controller and controller.is_running),
+        "running": running,
         "toy_name": getattr(controller.toy, "name", None) if controller else None,
         "joystick_id": joystick_obj.get_id() if joystick_obj else None,
         "player_number": controller.number if controller else None
@@ -371,7 +387,6 @@ def status():
 @app.route("/discover-nearest", methods=["POST"])
 def discover_nearest():
     global controller, joystick_obj
-    # Zorg dat joystick init is, zodat we meteen kunnen starten
     jid = int(request.form.get("joystick_id", "0"))
     pn = int(request.form.get("player_number", "1"))
 
@@ -386,7 +401,6 @@ def discover_nearest():
     name = controller.discover_nearest_toy()
     if not name:
         return "Geen Sphero gevonden.", 404
-    # Terug naar home; de gebruiker kan dan onmiddellijk op Start klikken
     return redirect(url_for('index'))
 
 @app.route("/start", methods=["POST"])
@@ -405,7 +419,10 @@ def start():
     except Exception as e:
         return f"Joystick-initialisatie faalde: {e}", 400
 
-    # (Re)maak controller met gekozen params
+    # Stop eventuele vorige controller veilig
+    if controller and controller.running:
+        controller.stop()
+
     controller = SpheroController(joystick_obj, Color(255, 0, 0), pn)
 
     if not toy_name:
@@ -415,7 +432,6 @@ def start():
     if not ok:
         return f"Kon toy '{toy_name}' niet vinden.", 404
 
-    # Start besturingsloop op achtergrond
     controller.start()
     return redirect(url_for('index'))
 
@@ -426,7 +442,7 @@ def stop():
         controller.stop()
     return redirect(url_for('index'))
 
-# Optioneel: clean shutdown-hook (ctrl+c)
+# Netjes afsluiten bij proces-stop
 def _shutdown():
     global controller
     try:
@@ -435,9 +451,14 @@ def _shutdown():
             time.sleep(0.2)
     except Exception:
         pass
+    try:
+        pygame.quit()
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     try:
+        # Luister op alle IP's
         app.run(host="0.0.0.0", port=5000, debug=True)
     finally:
         _shutdown()
