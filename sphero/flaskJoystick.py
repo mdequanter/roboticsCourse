@@ -6,7 +6,7 @@ import pygame
 from spherov2 import scanner
 from spherov2.types import Color
 from spherov2.sphero_edu import SpheroEduAPI
-from spherov2.commands.power import Power, BatteryVoltageReadingTypes
+from spherov2.commands.power import Power  # we’ll call what’s available at runtime
 
 SETTINGS_FILE = "last_settings.json"
 
@@ -29,10 +29,14 @@ class SpheroController:
         self.color=color; self.number=int(ball_number)
         self.gameOn=False; self.hillCounter=0
         self._stop_evt=threading.Event(); self._thread=None; self._api_ctx=None
+
         # batterijstatus
         self.battery_voltage_v: Optional[float] = None
         self.battery_percent: Optional[int] = None
         self._last_batt_poll = 0.0
+
+        # debugging
+        self._last_batt_error: Optional[str] = None
 
     def discover_toy(self,toy_name:str)->bool:
         try:
@@ -54,6 +58,89 @@ class SpheroController:
         try: api.set_matrix_character(str(self.number),self.color)
         except Exception: api.set_main_led(self.color)
 
+    # ---------- batterij helpers ----------
+    def _normalize_voltage(self, v: float) -> float:
+        """
+        Converteer naar Volt indien lib andere schaal gebruikt.
+        Heuristiek:
+          - > 20   : waarschijnlijk millivolt -> /1000
+          - 5..20  : waarschijnlijk centivolt -> /100
+          - anders : al in Volt
+        """
+        try:
+            fv = float(v)
+        except Exception:
+            return None
+        if fv > 20.0:
+            return round(fv / 1000.0, 2)
+        if 5.0 < fv <= 20.0:
+            return round(fv / 100.0, 2)
+        return round(fv, 2)
+
+    def _poll_battery(self, api):
+        """
+        Probeer meerdere paden zodat dit werkt met verschillende spherov2 versies / robots.
+        """
+        toy = getattr(api, "toy", None) or getattr(api, "_toy", None) or self.toy
+        self._last_batt_error = None
+
+        # 1) Probeer SpheroEduAPI convenience methods (als ze bestaan)
+        try:
+            if hasattr(api, "get_battery_percentage"):
+                pct = api.get_battery_percentage()
+                self.battery_percent = int(pct) if pct is not None else None
+        except Exception as e:
+            self.battery_percent = None
+            self._last_batt_error = f"SpheroEduAPI.get_battery_percentage: {e}"
+
+        try:
+            if hasattr(api, "get_battery_voltage"):
+                vv = api.get_battery_voltage()
+                nv = self._normalize_voltage(vv)
+                self.battery_voltage_v = nv
+                return
+        except Exception as e:
+            self._last_batt_error = f"SpheroEduAPI.get_battery_voltage: {e}"
+
+        # 2) Force refresh als ondersteund
+        try:
+            if toy and hasattr(Power, "force_battery_refresh"):
+                Power.force_battery_refresh(toy)
+        except Exception as e:
+            # niet kritisch
+            self._last_batt_error = f"force_battery_refresh: {e}"
+
+        # 3) Power.* varianten
+        # 3a) percentage
+        if self.battery_percent is None:
+            try:
+                if toy and hasattr(Power, "get_battery_percentage"):
+                    pct = Power.get_battery_percentage(toy)
+                    self.battery_percent = int(pct) if pct is not None else None
+            except Exception as e:
+                self.battery_percent = None
+                self._last_batt_error = f"Power.get_battery_percentage: {e}"
+
+        # 3b) voltage in volt (sommige versies)
+        try:
+            if toy and hasattr(Power, "get_battery_voltage_in_volts"):
+                vv = Power.get_battery_voltage_in_volts(toy)
+                self.battery_voltage_v = self._normalize_voltage(vv)
+                return
+        except Exception as e:
+            self._last_batt_error = f"Power.get_battery_voltage_in_volts: {e}"
+
+        # 3c) generieke voltage (schaal onbekend)
+        try:
+            if toy and hasattr(Power, "get_battery_voltage"):
+                vv = Power.get_battery_voltage(toy)
+                self.battery_voltage_v = self._normalize_voltage(vv)
+                return
+        except Exception as e:
+            self._last_batt_error = f"Power.get_battery_voltage: {e}"
+            self.battery_voltage_v = None
+
+    # ---------- hoofdloop ----------
     def _loop(self):
         api=self.connect_toy()
         if api is None: return
@@ -82,23 +169,9 @@ class SpheroController:
                     if now - self._last_batt_poll >= 1.0:
                         self._last_batt_poll = now
                         try:
-                            toy = api.toy
-                            try:
-                                Power.force_battery_refresh(toy)
-                            except Exception:
-                                pass
-                            try:
-                                v = Power.get_battery_voltage_in_volts(
-                                    toy, BatteryVoltageReadingTypes.CALIBRATED_AND_FILTERED
-                                )
-                            except Exception:
-                                v = float(Power.get_battery_voltage(toy))
-                            self.battery_voltage_v = round(float(v), 2)
-                            try:
-                                self.battery_percent = int(Power.get_battery_percentage(toy))
-                            except Exception:
-                                self.battery_percent = None
-                        except Exception:
+                            self._poll_battery(api)
+                        except Exception as e:
+                            self._last_batt_error = f"_poll_battery wrapper: {e}"
                             self.battery_voltage_v = None
                             self.battery_percent = None
 
@@ -139,9 +212,10 @@ INDEX_HTML="""
 <!doctype html><html><head><meta charset="utf-8">
 <title>Sphero Controller</title>
 <style>
-body{font-family:sans-serif;margin:2rem;}form{display:grid;gap:.75rem;max-width:420px;}
-.status{background:#f6f6f6;padding:.6rem;border-radius:8px;margin-bottom:1rem;}
+body{font-family:sans-serif;margin:2rem;}form{display:grid;gap:.75rem;max-width:520px;}
+.status{background:#f6f6f6;padding:.6rem;border-radius:8px;margin-bottom:1rem;white-space:pre-wrap;}
 button{padding:.5rem .7rem;margin-right:.5rem;}
+small{opacity:.7}
 </style></head><body>
 <h1>Sphero Controller</h1>
 <div class="status" id="status">Status laden…</div>
@@ -165,20 +239,25 @@ button{padding:.5rem .7rem;margin-right:.5rem;}
     <button formaction="{{ url_for('stop') }}" formmethod="post">Stop</button>
   </div>
 </form>
+<small>Tip: als batterij “—” blijft, controleer Bluetooth-verbinding en library-versie.</small>
 <script>
 async function refresh(){
   try{
     let r=await fetch("{{ url_for('status') }}");
     let j=await r.json();
-    const battV = (j.battery_voltage_v!==null && j.battery_voltage_v!==undefined) ? `${j.battery_voltage_v.toFixed(2)} V` : '—';
+    const battV = (j.battery_voltage_v!==null && j.battery_voltage_v!==undefined) ? `${Number(j.battery_voltage_v).toFixed(2)} V` : '—';
     const battPct = (j.battery_percent!==null && j.battery_percent!==undefined) ? ` (${j.battery_percent}%)` : '';
+    const dbg = j.last_batt_error ? `\\n(debug: ${j.last_batt_error})` : '';
     document.getElementById('status').textContent =
-      `running: ${j.running}, toy: ${j.toy_name||'—'}, speler: ${j.player_number||'—'}, batterij: ${battV}${battPct}`;
+`running: ${j.running}
+toy: ${j.toy_name||'—'}
+speler: ${j.player_number||'—'}
+batterij: ${battV}${battPct}${dbg}`;
   }catch(e){
     document.getElementById('status').textContent='Status niet beschikbaar';
   }
 }
-refresh();setInterval(refresh,2000);
+refresh();setInterval(refresh,1500);
 </script></body></html>
 """
 
@@ -195,7 +274,8 @@ def status():
         "toy_name":getattr(controller.toy,"name",None) if controller else None,
         "player_number":controller.number if controller else None,
         "battery_voltage_v": controller.battery_voltage_v if controller else None,
-        "battery_percent": controller.battery_percent if controller else None
+        "battery_percent": controller.battery_percent if controller else None,
+        "last_batt_error": controller._last_batt_error if controller else None
     })
 
 @app.route("/start",methods=["POST"])
