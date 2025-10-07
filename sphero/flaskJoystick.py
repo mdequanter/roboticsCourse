@@ -6,7 +6,7 @@ import pygame
 from spherov2 import scanner
 from spherov2.types import Color
 from spherov2.sphero_edu import SpheroEduAPI
-from spherov2.commands.power import Power
+from spherov2.commands.power import Power, BatteryVoltageReadingTypes
 
 SETTINGS_FILE = "last_settings.json"
 
@@ -29,6 +29,10 @@ class SpheroController:
         self.color=color; self.number=int(ball_number)
         self.gameOn=False; self.hillCounter=0
         self._stop_evt=threading.Event(); self._thread=None; self._api_ctx=None
+        # batterijstatus
+        self.battery_voltage_v: Optional[float] = None
+        self.battery_percent: Optional[int] = None
+        self._last_batt_poll = 0.0
 
     def discover_toy(self,toy_name:str)->bool:
         try:
@@ -69,8 +73,35 @@ class SpheroController:
                     elif X>0.7: self.move(api,self.base_heading+22,0)
                     elif X<-0.7: self.move(api,self.base_heading-22,0)
                     else: api.set_speed(0)
+
                     try: self.base_heading=api.get_heading()
                     except Exception: pass
+
+                    # batterijstatus 1x/s verversen
+                    now = time.time()
+                    if now - self._last_batt_poll >= 1.0:
+                        self._last_batt_poll = now
+                        try:
+                            toy = api.toy
+                            try:
+                                Power.force_battery_refresh(toy)
+                            except Exception:
+                                pass
+                            try:
+                                v = Power.get_battery_voltage_in_volts(
+                                    toy, BatteryVoltageReadingTypes.CALIBRATED_AND_FILTERED
+                                )
+                            except Exception:
+                                v = float(Power.get_battery_voltage(toy))
+                            self.battery_voltage_v = round(float(v), 2)
+                            try:
+                                self.battery_percent = int(Power.get_battery_percentage(toy))
+                            except Exception:
+                                self.battery_percent = None
+                        except Exception:
+                            self.battery_voltage_v = None
+                            self.battery_percent = None
+
                     time.sleep(0.01)
         finally:
             try:
@@ -136,9 +167,17 @@ button{padding:.5rem .7rem;margin-right:.5rem;}
 </form>
 <script>
 async function refresh(){
-  try{let r=await fetch("{{ url_for('status') }}");let j=await r.json();
-  document.getElementById('status').textContent=`running: ${j.running}, toy: ${j.toy_name||'—'}, speler: ${j.player_number||'—'}`;}
-  catch(e){document.getElementById('status').textContent='Status niet beschikbaar';}}
+  try{
+    let r=await fetch("{{ url_for('status') }}");
+    let j=await r.json();
+    const battV = (j.battery_voltage_v!==null && j.battery_voltage_v!==undefined) ? `${j.battery_voltage_v.toFixed(2)} V` : '—';
+    const battPct = (j.battery_percent!==null && j.battery_percent!==undefined) ? ` (${j.battery_percent}%)` : '';
+    document.getElementById('status').textContent =
+      `running: ${j.running}, toy: ${j.toy_name||'—'}, speler: ${j.player_number||'—'}, batterij: ${battV}${battPct}`;
+  }catch(e){
+    document.getElementById('status').textContent='Status niet beschikbaar';
+  }
+}
 refresh();setInterval(refresh,2000);
 </script></body></html>
 """
@@ -154,7 +193,9 @@ def status():
     return jsonify({
         "running":bool(controller and controller.running),
         "toy_name":getattr(controller.toy,"name",None) if controller else None,
-        "player_number":controller.number if controller else None
+        "player_number":controller.number if controller else None,
+        "battery_voltage_v": controller.battery_voltage_v if controller else None,
+        "battery_percent": controller.battery_percent if controller else None
     })
 
 @app.route("/start",methods=["POST"])
