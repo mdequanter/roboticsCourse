@@ -175,7 +175,7 @@ def init_pygame_and_joystick(jid:int):
 
 INDEX_HTML="""
 <!doctype html><html><head><meta charset="utf-8">
-<title>Sphero Controller</title>
+<title>Sphero Controller {{toy_name}} - {{player_number}}</title>
 <style>
 body{font-family:sans-serif;margin:2rem;}form{display:grid;gap:.75rem;max-width:520px;}
 .status{background:#f6f6f6;padding:.6rem;border-radius:8px;margin-bottom:1rem;line-height:1.4}
