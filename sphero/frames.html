@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>5-Frames Viewer</title>
+  <style>
+    :root{
+      --gap: 10px;
+      --toolbar-h: 170px;
+      color-scheme: light dark;
+    }
+    *{ box-sizing: border-box; }
+    body{
+      margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+      height: 100dvh; display:flex; flex-direction:column; background: canvas; color: canvastext;
+    }
+    header{
+      padding: 12px;
+      border-bottom: 1px solid color-mix(in oklab, canvastext 20%, canvas 80%);
+      background: color-mix(in oklab, canvas 94%, canvastext 6%);
+    }
+    .controls{
+      display:grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    }
+    .inputs{
+      display:grid; grid-template-columns: auto 1fr auto; gap:8px; align-items:center;
+    }
+    .inputs label{ opacity:.8; font-size:.9rem; white-space:nowrap; }
+    .inputs input{
+      width:100%; padding:10px; border-radius:10px; border:1px solid color-mix(in oklab, canvastext 18%, canvas 82%);
+      background: canvas; color: canvastext;
+    }
+    .inputs button{
+      padding:10px 12px; border-radius:10px; border:1px solid color-mix(in oklab, canvastext 18%, canvas 82%);
+      background: color-mix(in oklab, canvas 92%, canvastext 8%); cursor:pointer;
+    }
+    .actions{
+      display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:start;
+    }
+    .actions button{
+      padding:10px 14px; border-radius:999px; border:1px solid color-mix(in oklab, canvastext 18%, canvas 82%);
+      background: color-mix(in oklab, canvas 92%, canvastext 8%); cursor:pointer;
+    }
+    .actions button[data-variant="primary"]{
+      background: color-mix(in oklab, canvastext 12%, canvas 88%); font-weight:600;
+    }
+    main{
+      height: 100%; padding: var(--gap);
+    }
+    .grid{
+      display:grid; gap: var(--gap); width:100%; height:100%;
+    }
+    /* Layouts */
+    .layout-grid{
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      grid-template-areas:
+        "f1 f2 f3"
+        "f1 f4 f5";
+    }
+    .layout-horizontal{
+      grid-template-columns: repeat(5, 1fr);
+      grid-template-rows: 1fr;
+    }
+    .layout-vertical{
+      grid-template-columns: 1fr;
+      grid-template-rows: repeat(5, 1fr);
+    }
+    iframe{
+      width:100%; height:100%; border:1px solid color-mix(in oklab, canvastext 18%, canvas 82%); border-radius:14px; background: #1112;
+    }
+    /* Areas for the 3x2 layout */
+    .layout-grid .f1{ grid-area: f1; }
+    .layout-grid .f2{ grid-area: f2; }
+    .layout-grid .f3{ grid-area: f3; }
+    .layout-grid .f4{ grid-area: f4; }
+    .layout-grid .f5{ grid-area: f5; }
+
+    /* Small screens: stack controls */
+    @media (max-width: 920px){
+      .controls{ grid-template-columns: 1fr; }
+      .actions{ justify-content:stretch; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="controls" role="group" aria-label="URL invoer en acties">
+      <div class="inputs">
+        <label for="u1">Frame 1</label>
+        <input id="u1" type="url" placeholder="https://voorbeeld1.com" inputmode="url" />
+        <button data-load="1" title="Laad enkel frame 1">Open</button>
+
+        <label for="u2">Frame 2</label>
+        <input id="u2" type="url" placeholder="https://voorbeeld2.com" inputmode="url" />
+        <button data-load="2" title="Laad enkel frame 2">Open</button>
+
+        <label for="u3">Frame 3</label>
+        <input id="u3" type="url" placeholder="https://voorbeeld3.com" inputmode="url" />
+        <button data-load="3" title="Laad enkel frame 3">Open</button>
+
+        <label for="u4">Frame 4</label>
+        <input id="u4" type="url" placeholder="https://voorbeeld4.com" inputmode="url" />
+        <button data-load="4" title="Laad enkel frame 4">Open</button>
+
+        <label for="u5">Frame 5</label>
+        <input id="u5" type="url" placeholder="https://voorbeeld5.com" inputmode="url" />
+        <button data-load="5" title="Laad enkel frame 5">Open</button>
+      </div>
+
+      <div class="actions">
+        <button id="openAll" data-variant="primary">Open alle</button>
+        <button id="swapGrid">3×2 layout</button>
+        <button id="swapH">Horizontaal</button>
+        <button id="swapV">Verticaal</button>
+        <button id="swapAll">Wissel layout</button>
+        <button id="clearAll" title="Verwijder URLs & leeg frames">Reset</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="frames" class="grid layout-grid" aria-label="Frames">
+      <div class="f1"><iframe id="f1" allow="fullscreen" referrerpolicy="no-referrer-when-downgrade"></iframe></div>
+      <div class="
