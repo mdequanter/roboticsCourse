@@ -115,7 +115,14 @@ class SpheroController:
                     # Snelheid presets + nummerkleur opnieuw tonen
                     if self.joystick.get_button(buttons['1']):
                         self.speed, self.color=(100,Color(255,200,0)); self.display_number(api)
-                        self.move(api,self.base_heading,self.speed)
+                        if X>0.7:
+                            self.move(api,self.base_heading+20,self.speed)
+                        elif X<-0.7: 
+                            self.move(api,self.base_heading-20,self.speed)
+                        else :
+                            self.move(api,self.base_heading,self.speed)
+
+
                     else:
                         self.speed = 0
                         self.move(api,self.base_heading,self.speed)
@@ -134,9 +141,9 @@ class SpheroController:
                     #if Y<-0.7: self.move(api,self.base_heading,self.speed)
                     #elif Y>0.7: self.move(api,self.base_heading+180,self.speed)
                     if X>0.7:
-                        self.base_heading+20
+                        self.move(api,self.base_heading+20,self.speed)
                     elif X<-0.7: 
-                        self.base_heading-20
+                        self.move(api,self.base_heading-20,self.speed)
                     #else: api.set_speed(0)
 
                     # Heading bijhouden
