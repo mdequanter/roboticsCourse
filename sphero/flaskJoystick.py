@@ -127,15 +127,10 @@ class SpheroController:
                         self.speed = 0
                         self.move(api,self.base_heading,self.speed)
 
-                    if self.joystick.get_button(buttons['2']):
-                        self.speed, self.color=(100,Color(255,100,0)); self.display_number(api)
-                        self.move(api,self.base_heading,self.speed)
                     if self.joystick.get_button(buttons['3']):
-                        self.speed, self.color=(0,Color(255,50,0)); self.display_number(api)
-                        self.move(api,self.base_heading,self.speed)
-                    if self.joystick.get_button(buttons['4']):
-                        self.speed, self.color=(0,Color(255,0,0)); self.display_number(api)
-                        self.move(api,self.base_heading,self.speed)
+                        self.speed, self.color=(100,Color(255,100,0)); self.display_number(api)
+                        self.move(api,self.base_heading+180,self.speed)
+                        time.sleep(1.0)  # even wachten zodat niet te snel meerdere keren triggeren
 
                     # Besturing
                     #if Y<-0.7: self.move(api,self.base_heading,self.speed)
