@@ -131,7 +131,7 @@ class SpheroController:
                         self.speed, self.color=(100,Color(255,100,0)); self.display_number(api)
                         self.move(api,self.base_heading+180,self.speed)
                         time.sleep(1.0)  # even wachten zodat niet te snel meerdere keren triggeren
-                        self.move(api,self.base_heading+180,0)
+                        self.move(api,self.base_heading,self.speed)
 
                     # Besturing
                     #if Y<-0.7: self.move(api,self.base_heading,self.speed)
