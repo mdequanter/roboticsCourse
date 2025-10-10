@@ -117,7 +117,7 @@ class SpheroController:
                         self.speed, self.color=(100,Color(255,200,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
                     if self.joystick.get_button(buttons['2']):
-                        self.speed, self.color=(150,Color(255,100,0)); self.display_number(api)
+                        self.speed, self.color=(100,Color(255,100,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
                     if self.joystick.get_button(buttons['3']):
                         self.speed, self.color=(0,Color(255,50,0)); self.display_number(api)
@@ -130,9 +130,9 @@ class SpheroController:
                     if Y<-0.7: self.move(api,self.base_heading,self.speed)
                     elif Y>0.7: self.move(api,self.base_heading+180,self.speed)
                     elif X>0.7:
-                        self.move(api,self.base_heading+15,self.speed)
+                        self.move(api,self.base_heading+20,self.speed)
                     elif X<-0.7: 
-                        self.move(api,self.base_heading-15,self.speed)
+                        self.move(api,self.base_heading-20,self.speed)
                     #else: api.set_speed(0)
 
                     # Heading bijhouden
