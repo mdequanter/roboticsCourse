@@ -125,8 +125,8 @@ class SpheroController:
                     # Besturing
                     if Y<-0.7: self.move(api,self.base_heading,self.speed)
                     elif Y>0.7: self.move(api,self.base_heading+180,self.speed)
-                    elif X>0.7: self.move(api,self.base_heading+22,0)
-                    elif X<-0.7: self.move(api,self.base_heading-22,0)
+                    elif X>0.7: self.move(api,self.base_heading+22,speed)
+                    elif X<-0.7: self.move(api,self.base_heading-22,speed)
                     else: api.set_speed(0)
 
                     # Heading bijhouden
