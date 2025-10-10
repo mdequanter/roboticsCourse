@@ -116,6 +116,9 @@ class SpheroController:
                     if self.joystick.get_button(buttons['1']):
                         self.speed, self.color=(100,Color(255,200,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
+                    else:
+                        self.speed = 0
+
                     if self.joystick.get_button(buttons['2']):
                         self.speed, self.color=(100,Color(255,100,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
