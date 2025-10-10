@@ -1,3 +1,4 @@
+# app.py
 import time, math, threading, json, os
 from typing import Optional
 from flask import Flask, request, redirect, url_for, render_template_string, jsonify
@@ -54,8 +55,13 @@ class SpheroController:
         try: api.set_matrix_character(str(self.number),self.color)
         except Exception: api.set_main_led(self.color)
 
-    # ---------- Battery logic ----------
+    # ---------- Battery logic (from second script, adapted for Flask/threading) ----------
     def _update_battery_led(self, api, voltage: float):
+        """
+        Zet front LED volgens de spanning en update state string.
+        """
+        # Drempels zoals in je voorbeeldscript
+        # >4.1V = groen; 3.9-4.1 = geel; <3.9 = oranje; <3.7 = rood; <3.5 = critical stop
         try:
             if voltage > 4.1:
                 api.set_front_led(Color(0, 255, 0)); self.battery_state = "green"
@@ -66,17 +72,22 @@ class SpheroController:
             elif 3.5 < voltage <= 3.7:
                 api.set_front_led(Color(255, 0, 0)); self.battery_state = "red"
             else:
+                # <= 3.5V -> critical
                 api.set_front_led(Color(255, 0, 0)); self.battery_state = "critical"
         except Exception as e:
             print(f"LED update error: {e}")
 
     def _check_battery(self, api):
+        """
+        Vraagt batterijspanning op en past LED/drempels toe. Roept stop aan bij critical.
+        """
         try:
             voltage = Power.get_battery_voltage(self.toy)
             self.battery_voltage = float(voltage) if voltage is not None else None
             if self.battery_voltage is not None:
                 print(f"Battery {self.number}: {self.battery_voltage:.2f} V")
                 self._update_battery_led(api, self.battery_voltage)
+                # Veilig stoppen bij kritieke spanning
                 if self.battery_voltage <= 3.5:
                     print("Batterij kritiek (<3.5V). Controller wordt gestopt.")
                     self.stop()
@@ -91,7 +102,9 @@ class SpheroController:
         self._api_ctx=api
         try:
             with api:
+                # Toon speler-nummer op matrix
                 self.display_number(api)
+                # Initiele battery check meteen bij start
                 self._check_battery(api)
                 self._last_batt_check = time.time()
 
@@ -99,6 +112,7 @@ class SpheroController:
                     pygame.event.pump()
                     X=self.joystick.get_axis(0); Y=self.joystick.get_axis(1)
 
+                    # Snelheid presets + nummerkleur opnieuw tonen
                     if self.joystick.get_button(buttons['1']):
                         self.speed, self.color=(100,Color(255,200,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
@@ -112,16 +126,20 @@ class SpheroController:
                         self.speed, self.color=(0,Color(255,0,0)); self.display_number(api)
                         self.move(api,self.base_heading,self.speed)
 
+                    # Besturing
                     if Y<-0.7: self.move(api,self.base_heading,self.speed)
                     elif Y>0.7: self.move(api,self.base_heading+180,self.speed)
                     elif X>0.7:
                         self.move(api,self.base_heading+20,self.speed)
                     elif X<-0.7: 
                         self.move(api,self.base_heading-20,self.speed)
+                    #else: api.set_speed(0)
 
+                    # Heading bijhouden
                     try: self.base_heading=api.get_heading()
                     except Exception: pass
 
+                    # Elke 30s batterij-status updaten
                     now = time.time()
                     if now - self._last_batt_check >= 30.0:
                         self._check_battery(api)
@@ -218,46 +236,6 @@ refresh();setInterval(refresh,2000);
 </script></body></html>
 """
 
-# --- AUTO-START LAATSTE SPHERO ---------------------------------------------
-_autostart_started = False  # voorkomt dubbele pogingen (gunicorn/werkers)
-
-def _autostart_last_sphero():
-    """
-    Probeer de laatst gebruikte Sphero automatisch te starten.
-    Draait in een aparte thread zodat Flask niet blokkeert.
-    """
-    global controller, joystick_obj
-    try:
-        s = load_settings()
-        toy_name = (s.get("toy_name") or "").strip()
-        jid = int(s.get("joystick_id", 0))
-        pn = int(s.get("player_number", 1))
-        if not toy_name:
-            print("[autostart] Geen toy_name in settings; overslaan.")
-            return
-
-        if joystick_obj is None:
-            try:
-                init_pygame_and_joystick(jid)
-            except Exception as e:
-                print(f"[autostart] Joystick fout: {e}")
-                return
-
-        if controller and controller.running:
-            print("[autostart] Controller draait al; overslaan.")
-            return
-
-        c = SpheroController(joystick_obj, Color(255, 0, 0), pn)
-        if not c.discover_toy(toy_name):
-            print(f"[autostart] Sphero '{toy_name}' niet gevonden.")
-            return
-
-        controller = c
-        controller.start()
-        print(f"[autostart] Sphero '{toy_name}' gestart (player {pn}).")
-    except Exception as e:
-        print(f"[autostart] Onverwachte fout: {e}")
-
 @app.route("/",methods=["GET"])
 def index():
     s=load_settings()
@@ -270,6 +248,7 @@ def status():
         "running":bool(controller and controller.running),
         "toy_name":getattr(controller.toy,"name",None) if controller else None,
         "player_number":controller.number if controller else None,
+        # batterij info naar de UI
         "battery_voltage":controller.battery_voltage if controller else None,
         "battery_state":controller.battery_state if controller else "unknown",
     })
@@ -293,13 +272,6 @@ def stop():
     global controller
     if controller: controller.stop()
     return redirect(url_for('index'))
-
-@app.before_first_request
-def _kickoff_autostart():
-    global _autostart_started
-    if not _autostart_started:
-        _autostart_started = True
-        threading.Thread(target=_autostart_last_sphero, daemon=True).start()
 
 if __name__=="__main__":
     try: app.run(host="0.0.0.0",port=5000,debug=True)
