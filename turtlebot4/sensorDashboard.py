@@ -9,6 +9,7 @@ sensor topics and serves a web page that visualises them live:
     * Proximity IR sensors           -> /ir_intensity   (TB4 has IR, not sonar)
     * LIDAR                          -> /scan           (drawn on a canvas)
     * OAK-D camera (depthai)         -> /oakd/rgb/image_raw/compressed (MJPEG)
+    * OAK-D depth / 3D (depthai)     -> /oakd/stereo/image_raw (colorised depth MJPEG)
     * Battery / IMU / dock           -> /battery_state, /imu, /dock_status
 
 Usage:
@@ -31,8 +32,17 @@ from rclpy.qos import qos_profile_sensor_data
 
 from rclpy.action import ActionClient
 
-from sensor_msgs.msg import LaserScan, BatteryState, Imu, CompressedImage
+from sensor_msgs.msg import LaserScan, BatteryState, Imu, CompressedImage, Image
 from geometry_msgs.msg import Twist
+
+# numpy + OpenCV are only needed to colourise the OAK-D depth image. If they
+# are missing we simply skip the depth view instead of crashing the dashboard.
+try:
+    import numpy as np
+    import cv2
+    HAVE_CV = True
+except ImportError:  # pragma: no cover
+    HAVE_CV = False
 
 # irobot_create_msgs is optional: if it is not installed we simply skip
 # those subscriptions (and dock/undock) instead of crashing the dashboard.
@@ -79,7 +89,9 @@ class SensorHub(Node):
         self.battery = None         # {"percentage": float, "voltage": float}
         self.imu = None             # {"roll":..,"pitch":..,"yaw":..}
         self.docked = None          # bool
-        self.jpeg = None            # latest camera frame as JPEG bytes
+        self.jpeg = None            # latest RGB camera frame as JPEG bytes
+        self.depth_jpeg = None      # latest colourised depth frame as JPEG bytes
+        self.depth_center_m = None  # distance (m) at the centre of the frame
 
         # Teleop: cmd_vel publisher + a deadman timer so the robot stops
         # automatically shortly after each button press.
@@ -101,6 +113,14 @@ class SensorHub(Node):
             self._on_image,
             sensor_qos,
         )
+        if HAVE_CV:
+            self.create_subscription(
+                Image, "/oakd/stereo/image_raw", self._on_depth, sensor_qos
+            )
+        else:
+            self.get_logger().warn(
+                "numpy/cv2 not found: OAK-D depth (3D) view disabled."
+            )
 
         if HAVE_CREATE_MSGS:
             self.create_subscription(
@@ -183,6 +203,46 @@ class SensorHub(Node):
         with self._lock:
             self.jpeg = bytes(msg.data)
 
+    # Depth beyond this (metres) is clipped so the colour map keeps its range
+    # useful for the couple of metres the OAK-D Lite actually resolves indoors.
+    DEPTH_MAX_M = 4.0
+
+    def _on_depth(self, msg):
+        """Colourise the OAK-D stereo depth image (16UC1, millimetres)."""
+        if not HAVE_CV:
+            return
+        h, w = msg.height, msg.width
+        if h == 0 or w == 0:
+            return
+        # 16-bit, honour byte order; step may be padded so slice to width.
+        dt = np.dtype(">u2") if msg.is_bigendian else np.dtype("<u2")
+        try:
+            depth = np.frombuffer(bytes(msg.data), dtype=dt)
+            depth = depth.reshape(h, msg.step // 2)[:, :w].astype(np.float32)
+        except ValueError:
+            return
+        depth_m = depth / 1000.0  # mm -> m
+        invalid = depth == 0      # depthai uses 0 for "no reading"
+
+        # Median distance over a small central patch -> robust centre reading.
+        cy, cx = h // 2, w // 2
+        patch = depth_m[max(0, cy - 5):cy + 5, max(0, cx - 5):cx + 5]
+        valid_patch = patch[patch > 0]
+        center_m = round(float(np.median(valid_patch)), 2) if valid_patch.size else None
+
+        # Normalise 0..DEPTH_MAX_M -> 0..255 and apply a JET colour map.
+        norm = np.clip(depth_m / self.DEPTH_MAX_M, 0.0, 1.0)
+        # Invert so near = warm/red, far = cool/blue.
+        img8 = ((1.0 - norm) * 255.0).astype(np.uint8)
+        color = cv2.applyColorMap(img8, cv2.COLORMAP_JET)
+        color[invalid] = (0, 0, 0)  # no reading -> black
+
+        ok, jpg = cv2.imencode(".jpg", color)
+        with self._lock:
+            self.depth_center_m = center_m
+            if ok:
+                self.depth_jpeg = bytes(jpg)
+
     # ---- snapshots for the web layer ------------------------------------
     def snapshot(self):
         with self._lock:
@@ -194,6 +254,8 @@ class SensorHub(Node):
                 "docked": self.docked,
                 "have_create_msgs": HAVE_CREATE_MSGS,
                 "have_camera": self.jpeg is not None,
+                "have_depth": self.depth_jpeg is not None,
+                "depth_center_m": self.depth_center_m,
             }
 
     def scan_snapshot(self):
@@ -203,6 +265,10 @@ class SensorHub(Node):
     def latest_jpeg(self):
         with self._lock:
             return self.jpeg
+
+    def latest_depth_jpeg(self):
+        with self._lock:
+            return self.depth_jpeg
 
     # ---- teleop / actions ------------------------------------------------
     def _now(self):
@@ -345,6 +411,18 @@ INDEX_HTML = """
          onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'muted',textContent:'geen camerabeeld'}))">
   </div>
 
+  <div class="card">
+    <h2>OAK-D diepte (3D)</h2>
+    <img id="depth" src="{{ url_for('depth') }}" alt="depth stream"
+         onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'muted',textContent:'geen dieptebeeld'}))">
+    <div class="kv" style="margin-top:.5rem">
+      <span>Afstand (midden)</span><span id="depthmid" class="muted">…</span>
+    </div>
+    <div class="muted" style="font-size:.75rem;margin-top:.3rem">
+      rood = dichtbij · blauw = ver · zwart = geen meting
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -409,6 +487,18 @@ async function refresh(){
       html += `<div class="kv"><span>Dock</span><span>${j.docked ? "gedockt" : "los"}</span></div>`;
     }
     st.innerHTML = html || '<span class="muted">geen data</span>';
+
+    // OAK-D depth centre distance
+    const dm = document.getElementById('depthmid');
+    if(dm){
+      if(!j.have_depth){
+        dm.textContent = "geen dieptedata";
+      } else if(j.depth_center_m === null || j.depth_center_m === undefined){
+        dm.textContent = "—";
+      } else {
+        dm.textContent = j.depth_center_m.toFixed(2) + " m";
+      }
+    }
   }catch(e){
     document.getElementById('conn').textContent = "• geen verbinding";
   }
@@ -474,13 +564,13 @@ def cmd(action):
     return jsonify({"ok": ok, "msg": msg}), (200 if ok else 400)
 
 
-def mjpeg_generator():
-    """Yield the latest camera frame as an MJPEG stream."""
+def mjpeg_generator(getter):
+    """Yield frames from `getter` (a callable returning JPEG bytes) as MJPEG."""
     import time
 
     boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
     while True:
-        frame = hub.latest_jpeg() if hub else None
+        frame = getter() if hub else None
         if frame:
             yield boundary + frame + b"\r\n"
         time.sleep(0.05)  # ~20 fps cap
@@ -489,7 +579,15 @@ def mjpeg_generator():
 @app.route("/camera")
 def camera():
     return Response(
-        mjpeg_generator(),
+        mjpeg_generator(lambda: hub.latest_jpeg() if hub else None),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.route("/depth")
+def depth():
+    return Response(
+        mjpeg_generator(lambda: hub.latest_depth_jpeg() if hub else None),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
 
