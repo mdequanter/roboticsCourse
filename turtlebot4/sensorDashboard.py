@@ -29,21 +29,25 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
+from rclpy.action import ActionClient
+
 from sensor_msgs.msg import LaserScan, BatteryState, Imu, CompressedImage
+from geometry_msgs.msg import Twist
 
 # irobot_create_msgs is optional: if it is not installed we simply skip
-# those subscriptions instead of crashing the whole dashboard.
+# those subscriptions (and dock/undock) instead of crashing the dashboard.
 try:
     from irobot_create_msgs.msg import (
         HazardDetectionVector,
         IrIntensityVector,
         DockStatus,
     )
+    from irobot_create_msgs.action import Dock, Undock
     HAVE_CREATE_MSGS = True
 except ImportError:  # pragma: no cover
     HAVE_CREATE_MSGS = False
 
-from flask import Flask, Response, jsonify, render_template_string
+from flask import Flask, Response, jsonify, render_template_string, request
 
 
 # --------------------------------------------------------------------------
@@ -59,6 +63,11 @@ class SensorHub(Node):
         4: "OBJECT_PROXIMITY",
     }
 
+    # Teleop speeds and how long one button press keeps driving.
+    LINEAR_SPEED = 0.15   # m/s
+    ANGULAR_SPEED = 0.8   # rad/s
+    DRIVE_DURATION = 0.6  # seconds per press
+
     def __init__(self):
         super().__init__("sensor_dashboard")
         self._lock = threading.Lock()
@@ -71,6 +80,13 @@ class SensorHub(Node):
         self.imu = None             # {"roll":..,"pitch":..,"yaw":..}
         self.docked = None          # bool
         self.jpeg = None            # latest camera frame as JPEG bytes
+
+        # Teleop: cmd_vel publisher + a deadman timer so the robot stops
+        # automatically shortly after each button press.
+        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self._cmd_twist = Twist()
+        self._drive_until = 0.0  # ROS time (seconds) the current command expires
+        self.create_timer(0.1, self._drive_tick)
 
         sensor_qos = qos_profile_sensor_data
 
@@ -96,9 +112,13 @@ class SensorHub(Node):
             self.create_subscription(
                 DockStatus, "/dock_status", self._on_dock, sensor_qos
             )
+            self._dock_client = ActionClient(self, Dock, "/dock")
+            self._undock_client = ActionClient(self, Undock, "/undock")
         else:
+            self._dock_client = None
+            self._undock_client = None
             self.get_logger().warn(
-                "irobot_create_msgs not found: bumpers/IR/dock disabled."
+                "irobot_create_msgs not found: bumpers/IR/dock/undock disabled."
             )
 
     # ---- callbacks -------------------------------------------------------
@@ -184,6 +204,49 @@ class SensorHub(Node):
         with self._lock:
             return self.jpeg
 
+    # ---- teleop / actions ------------------------------------------------
+    def _now(self):
+        return self.get_clock().now().nanoseconds / 1e9
+
+    def _drive_tick(self):
+        """Deadman: publish the commanded twist, or stop when it expires."""
+        if self._now() < self._drive_until:
+            self.cmd_pub.publish(self._cmd_twist)
+        else:
+            self.cmd_pub.publish(Twist())  # zero -> stop
+
+    def drive(self, linear, angular):
+        """Drive for DRIVE_DURATION seconds (re-pressing extends it)."""
+        t = Twist()
+        t.linear.x = float(linear)
+        t.angular.z = float(angular)
+        self._cmd_twist = t
+        self._drive_until = self._now() + self.DRIVE_DURATION
+
+    def command(self, action):
+        """Handle a button press. Returns (ok, message)."""
+        moves = {
+            "forward": (self.LINEAR_SPEED, 0.0),
+            "backward": (-self.LINEAR_SPEED, 0.0),
+            "left": (0.0, self.ANGULAR_SPEED),
+            "right": (0.0, -self.ANGULAR_SPEED),
+            "stop": (0.0, 0.0),
+        }
+        if action in moves:
+            self.drive(*moves[action])
+            return True, action
+        if action == "dock":
+            if self._dock_client is None:
+                return False, "dock action not available"
+            self._dock_client.send_goal_async(Dock.Goal())
+            return True, "dock"
+        if action == "undock":
+            if self._undock_client is None:
+                return False, "undock action not available"
+            self._undock_client.send_goal_async(Undock.Goal())
+            return True, "undock"
+        return False, f"unknown action: {action}"
+
 
 # --------------------------------------------------------------------------
 # ROS spinning in a background thread so Flask stays responsive.
@@ -223,9 +286,38 @@ INDEX_HTML = """
   .bar>span{display:block;height:100%;background:#2ea043;}
   .irrow{display:flex;align-items:center;gap:.5rem;margin:.2rem 0;font-size:.85rem;}
   .irrow .bar{flex:1;}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;max-width:260px;}
+  .pad button{padding:.7rem;font-size:1.1rem;border:1px solid #263445;border-radius:10px;
+    background:#22303f;color:#e6edf3;cursor:pointer;}
+  .pad button:hover{background:#2d3f52;}
+  .pad button:active{background:#2ea043;}
+  .dockrow{display:flex;gap:.5rem;margin-bottom:.6rem;}
+  .dockrow button{flex:1;padding:.6rem;border:1px solid #263445;border-radius:10px;
+    background:#1b2b3a;color:#e6edf3;cursor:pointer;}
+  .dockrow button:hover{background:#243848;}
 </style></head><body>
 <h1>🐢 TurtleBot 4 &mdash; live sensors <span class="muted" id="conn"></span></h1>
 <div class="grid">
+
+  <div class="card">
+    <h2>Besturing</h2>
+    <div class="dockrow">
+      <button onclick="send('dock')">⚓ Dock</button>
+      <button onclick="send('undock')">⏏ Undock</button>
+    </div>
+    <div class="pad">
+      <span></span>
+      <button onclick="send('forward')">▲</button>
+      <span></span>
+      <button onclick="send('left')">◀</button>
+      <button onclick="send('stop')">■</button>
+      <button onclick="send('right')">▶</button>
+      <span></span>
+      <button onclick="send('backward')">▼</button>
+      <span></span>
+    </div>
+    <div class="muted" id="cmdmsg" style="margin-top:.5rem;font-size:.8rem;"></div>
+  </div>
 
   <div class="card">
     <h2>Bumpers / Hazards</h2>
@@ -257,6 +349,20 @@ INDEX_HTML = """
 
 <script>
 function pill(text, alert){return `<span class="pill ${alert?'alert':'ok'}">${text}</span>`;}
+
+async function send(action){
+  const el = document.getElementById('cmdmsg');
+  try{
+    const j = await (await fetch("/cmd/" + action, {method:"POST"})).json();
+    el.textContent = (j.ok ? "→ " : "⚠ ") + j.msg;
+  }catch(e){ el.textContent = "⚠ commando mislukt"; }
+}
+
+// Pijltjestoetsen als extra besturing.
+document.addEventListener('keydown', (e) => {
+  const map = {ArrowUp:'forward', ArrowDown:'backward', ArrowLeft:'left', ArrowRight:'right', ' ':'stop'};
+  if(map[e.key]){ e.preventDefault(); send(map[e.key]); }
+});
 
 async function refresh(){
   try{
@@ -358,6 +464,14 @@ def lidar():
     if hub is None:
         return jsonify(None), 503
     return jsonify(hub.scan_snapshot())
+
+
+@app.route("/cmd/<action>", methods=["POST"])
+def cmd(action):
+    if hub is None:
+        return jsonify({"ok": False, "msg": "ROS not ready"}), 503
+    ok, msg = hub.command(action)
+    return jsonify({"ok": ok, "msg": msg}), (200 if ok else 400)
 
 
 def mjpeg_generator():
