@@ -4,7 +4,7 @@ import os
 windowName = "turtleCam"
 
 cv2.namedWindow(windowName)
-vc = cv2.VideoCapture("http://10.2.172."+os.getenv('ROS_DOMAIN_ID')+":8080/?action=stream")
+vc = cv2.VideoCapture("http://10.2.172.125:8000/?action=stream")
 
 
 def rescale_frame(frame, percent=75):
